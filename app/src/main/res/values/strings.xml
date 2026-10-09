@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">دوامي المدرسي</string>
+    <string name="notification_channel_name">تنبيهات الدوام</string>
+    <string name="notification_channel_description">تنبيهات الحصص الدراسية</string>
+</resources>
