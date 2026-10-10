@@ -17,7 +17,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-<<<<<<< HEAD
     // A fixed, committed debug keystore (app/debug.keystore) instead of the
     // auto-generated one. Without this, every CI build (and every machine)
     // signs with a different random key, so Android treats each build as a
@@ -40,8 +39,6 @@ android {
         }
     }
 
-=======
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
     buildFeatures {
         compose = true
         buildConfig = true
