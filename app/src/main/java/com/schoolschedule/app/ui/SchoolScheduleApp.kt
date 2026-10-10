@@ -4,7 +4,6 @@ package com.schoolschedule.app.ui
 
 import android.content.Context
 import androidx.compose.animation.AnimatedContent
-<<<<<<< HEAD
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -20,24 +19,14 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-=======
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-<<<<<<< HEAD
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.offset
-=======
-import androidx.compose.foundation.layout.Arrangement
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,10 +40,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-<<<<<<< HEAD
 import androidx.compose.foundation.lazy.itemsIndexed
-=======
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -118,13 +104,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-<<<<<<< HEAD
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.graphicsLayer
-=======
-import androidx.compose.ui.draw.clip
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -325,7 +307,6 @@ private fun MainScaffold(controller: AppController) {
             AnimatedContent(
                 targetState = controller.screen,
                 label = "screen",
-<<<<<<< HEAD
                 transitionSpec = {
                     // Slide toward/away from whichever side the new tab sits on
                     // in the bottom bar, instead of a flat cross-fade.
@@ -336,9 +317,6 @@ private fun MainScaffold(controller: AppController) {
                     (slideInHorizontally(tween(260)) { dir * it / 4 } + fadeIn(tween(260))) togetherWith
                         (slideOutHorizontally(tween(200)) { -dir * it / 4 } + fadeOut(tween(200)))
                 },
-=======
-                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
             ) { screen ->
                 when (screen) {
                     Screen.HOME -> HomeScreen(controller)
@@ -362,7 +340,6 @@ private fun HomeScreen(controller: AppController) {
     val todayLessons = remember(now.toLocalDate(), data) { engine.lessonsFor(now.toLocalDate(), selection) }
     Scaffold(topBar = { TitleBar("دوامي المدرسي") }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-<<<<<<< HEAD
             item { StaggeredEntrance(0) { HeaderDate(engine, now.toLocalDate(), selection) } }
             item {
                 StaggeredEntrance(1) {
@@ -374,17 +351,6 @@ private fun HomeScreen(controller: AppController) {
             if (todayLessons.isNotEmpty()) {
                 item { StaggeredEntrance(2) { Text("خط سير اليوم", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) } }
                 item { StaggeredEntrance(3) { DayTimeline(todayLessons, now.toLocalTime(), selection.role == UserRole.TEACHER) } }
-=======
-            item { HeaderDate(engine, now.toLocalDate(), selection) }
-            item {
-                AnimatedContent(targetState = status::class, label = "status") { _ ->
-                    CurrentStatusCard(status, selection.role == UserRole.TEACHER)
-                }
-            }
-            if (todayLessons.isNotEmpty()) {
-                item { Text("خط سير اليوم", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                item { DayTimeline(todayLessons, now.toLocalTime(), selection.role == UserRole.TEACHER) }
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
             }
         }
     }
@@ -394,12 +360,8 @@ private fun HomeScreen(controller: AppController) {
 private fun DayTimeline(lessons: List<Lesson>, now: LocalTime, teacher: Boolean) {
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-<<<<<<< HEAD
         itemsIndexed(lessons) { index, lesson ->
             StaggeredEntrance(index) {
-=======
-        items(lessons) { lesson ->
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
             val isPast = now.isAfter(lesson.period.end)
             val isCurrent = !now.isBefore(lesson.period.start) && now.isBefore(lesson.period.end)
             val colors = subjectColor(lesson.subject, dark)
@@ -435,10 +397,7 @@ private fun DayTimeline(lessons: List<Lesson>, now: LocalTime, teacher: Boolean)
                     )
                 }
             }
-<<<<<<< HEAD
             }
-=======
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
         }
     }
 }
@@ -476,14 +435,7 @@ private fun StatusMessageCard(title: String, subtitle: String, offDay: Boolean) 
         )
         Column(Modifier.padding(20.dp), horizontalAlignment = if (offDay) Alignment.CenterHorizontally else Alignment.Start, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (offDay) {
-<<<<<<< HEAD
                 DayOffIllustration(modifier = Modifier.size(120.dp))
-=======
-                Image(
-                    painter = painterResource(R.drawable.day_off_illustration), contentDescription = null,
-                    modifier = Modifier.size(120.dp),
-                )
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
             }
             Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.White, textAlign = if (offDay) TextAlign.Center else TextAlign.Start)
             Text(subtitle, color = Color.White.copy(alpha = 0.92f), textAlign = if (offDay) TextAlign.Center else TextAlign.Start)
@@ -518,14 +470,7 @@ private fun CurrentStatusCard(status: DayStatus, teacher: Boolean) {
                     Text(status.note ?: "الجمعة والسبت والعطل الاستثنائية لا تحتوي على حصص.", color = onColor.copy(alpha = 0.92f))
                 }
                 DayStatus.NoLessonsToday -> if (teacher) {
-<<<<<<< HEAD
                     DayOffIllustration(modifier = Modifier.size(120.dp).align(Alignment.CenterHorizontally))
-=======
-                    Image(
-                        painter = painterResource(R.drawable.day_off_illustration), contentDescription = null,
-                        modifier = Modifier.size(120.dp).align(Alignment.CenterHorizontally),
-                    )
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
                     Text("اليوم عطلتك المميزة 🎉", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = onColor, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                     Text("استمتع بوقت فراغك", color = onColor.copy(alpha = 0.92f), modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                 } else {
@@ -547,19 +492,14 @@ private fun CurrentStatusCard(status: DayStatus, teacher: Boolean) {
                     Text("الحصة الحالية", style = MaterialTheme.typography.labelLarge, color = onColor.copy(alpha = 0.85f))
                     LessonDetails(status.current, teacher, onColor, prominent = true)
                     val totalSeconds = java.time.Duration.between(status.current.period.start, status.current.period.end).seconds.coerceAtLeast(1)
-<<<<<<< HEAD
                     val targetProgress = (1f - status.remainingSeconds.toFloat() / totalSeconds.toFloat()).coerceIn(0f, 1f)
                     // Animate between the per-second jumps so the ring sweeps smoothly
                     // instead of visibly ticking in discrete steps.
                     val animatedProgress by animateFloatAsState(targetProgress, animationSpec = tween(900), label = "ringProgress")
-=======
-                    val progress = (1f - status.remainingSeconds.toFloat() / totalSeconds.toFloat()).coerceIn(0f, 1f)
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         // A clock-face ring, echoing the clock in the app logo, instead of a plain bar.
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(76.dp)) {
                             CircularProgressIndicator(
-<<<<<<< HEAD
                                 progress = { animatedProgress }, modifier = Modifier.fillMaxSize(), strokeWidth = 7.dp,
                                 color = onColor, trackColor = onColor.copy(alpha = 0.25f),
                             )
@@ -574,16 +514,6 @@ private fun CurrentStatusCard(status: DayStatus, teacher: Boolean) {
                                 targetState = formatDuration(status.remainingSeconds), label = "remainingText",
                                 transitionSpec = { (slideInVertically(tween(220)) { it / 2 } + fadeIn(tween(220))) togetherWith (slideOutVertically(tween(220)) { -it / 2 } + fadeOut(tween(220))) },
                             ) { text -> Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = onColor) }
-=======
-                                progress = { progress }, modifier = Modifier.fillMaxSize(), strokeWidth = 7.dp,
-                                color = onColor, trackColor = onColor.copy(alpha = 0.25f),
-                            )
-                            Text(formatDurationCompact(status.remainingSeconds), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = onColor)
-                        }
-                        Column {
-                            Text("باقٍ على نهاية الحصة", color = onColor.copy(alpha = 0.85f), style = MaterialTheme.typography.bodySmall)
-                            Text(formatDuration(status.remainingSeconds), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = onColor)
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
                         }
                     }
                     Divider(Modifier.padding(vertical = 4.dp), color = onColor.copy(alpha = 0.3f))
@@ -730,7 +660,6 @@ private fun DayTable(day: String, lessons: List<Lesson>, teacher: Boolean, now: 
     }
 }
 
-<<<<<<< HEAD
 // Fades + slides each item in with a small per-index delay, so a screen's
 // content arrives as a gentle cascade instead of popping in all at once.
 @Composable
@@ -770,8 +699,6 @@ private fun DayOffIllustration(modifier: Modifier = Modifier) {
     )
 }
 
-=======
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
 // Shows nothing (not a placeholder box) when the subject has no matching
 // artwork yet, so layouts never show an empty/broken-looking square.
 @Composable
@@ -832,11 +759,7 @@ private fun SettingsScreen(controller: AppController) {
             } else {
                 items(holidays.toSortedMap().entries.toList()) { (date, note) ->
                     Card(
-<<<<<<< HEAD
                         Modifier.fillMaxWidth().bounceClick { editingDate = date; noteDraft = note.orEmpty() },
-=======
-                        Modifier.fillMaxWidth().clickable { editingDate = date; noteDraft = note.orEmpty() },
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
                         shape = MaterialTheme.shapes.medium,
                     ) {
                         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -919,11 +842,7 @@ private fun SectionHeader(title: String) = Text(
 )
 
 @Composable
-<<<<<<< HEAD
 private fun SettingItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) = Card(Modifier.fillMaxWidth().bounceClick(onClick), shape = MaterialTheme.shapes.medium) {
-=======
-private fun SettingItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) = Card(Modifier.fillMaxWidth().clickable(onClick = onClick), shape = MaterialTheme.shapes.medium) {
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(14.dp))
@@ -943,11 +862,7 @@ private fun ToggleItem(icon: androidx.compose.ui.graphics.vector.ImageVector, ti
 
 @Composable
 private fun OptionCard(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, subjectForIcon: String? = null, click: () -> Unit) = Card(
-<<<<<<< HEAD
     Modifier.fillMaxWidth().bounceClick(click), shape = MaterialTheme.shapes.large,
-=======
-    Modifier.fillMaxWidth().clickable(onClick = click), shape = MaterialTheme.shapes.large,
->>>>>>> 6047e9bfbf9089c3196811829b26bafc67545ee8
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
 ) {
     Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
