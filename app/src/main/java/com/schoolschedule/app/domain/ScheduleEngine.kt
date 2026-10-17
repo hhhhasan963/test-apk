@@ -48,7 +48,7 @@ class ScheduleEngine(private val data: ScheduleData) {
 
     fun status(now: LocalDateTime, selection: UserSelection): DayStatus {
         val date = now.toLocalDate()
-        if (isHoliday(date)) return DayStatus.Holiday(holidayNote(date))
+        if (isHoliday(date)) return DayStatus.Holiday(holidayNote(date), date)
         val lessons = lessonsFor(date, selection)
         if (lessons.isEmpty()) return DayStatus.NoLessonsToday
         val time = now.toLocalTime()

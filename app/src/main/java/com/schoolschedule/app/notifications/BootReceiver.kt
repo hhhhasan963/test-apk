@@ -6,6 +6,6 @@ import android.content.Intent
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        NotificationScheduler.reschedule(context)
+        runCatching { NotificationScheduler.reschedule(context) }
     }
 }

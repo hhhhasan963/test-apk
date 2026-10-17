@@ -31,6 +31,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -73,6 +76,8 @@ fun NotificationLabScreen(controller: AppController, onBack: () -> Unit) {
     var pending by remember { mutableStateOf(NotificationTestStore.pending(context)) }
     var log by remember { mutableStateOf(NotificationTestStore.readLog()) }
     var showTimePicker by remember { mutableStateOf(false) }
+    // 0 = normal exact alarm, 1 = alarm-clock type, 2 = both at the same minute (for a side-by-side comparison)
+    var testType by remember { mutableStateOf(0) }
 
     // Poll every second: cheap (tiny local file/prefs) and it's what lets a test
     // that just fired — while the user is sitting on this exact screen — show
@@ -87,9 +92,14 @@ fun NotificationLabScreen(controller: AppController, onBack: () -> Unit) {
     }
 
     fun addTest(atMillis: Long, label: String) {
-        val id = UUID.randomUUID().toString()
-        NotificationTestStore.addPending(context, PendingNotificationTest(id, label, atMillis))
-        NotificationScheduler.scheduleTest(context, id, label, atMillis)
+        val kinds = when (testType) { 0 -> listOf(false); 1 -> listOf(true); else -> listOf(false, true) }
+        kinds.forEach { wantClock ->
+            val id = UUID.randomUUID().toString()
+            val tag = when { testType == 2 -> if (wantClock) " [منبّه]" else " [عادي]"; testType == 1 -> " [منبّه]"; else -> "" }
+            val fullLabel = label + tag
+            val usedType = NotificationScheduler.scheduleTest(context, id, fullLabel, atMillis, wantClock)
+            NotificationTestStore.addPending(context, PendingNotificationTest(id, fullLabel, atMillis, usedType))
+        }
         pending = NotificationTestStore.pending(context)
     }
 
@@ -109,6 +119,19 @@ fun NotificationLabScreen(controller: AppController, onBack: () -> Unit) {
             }
 
             item { LabSectionHeader("إضافة اختبار") }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        SegmentedButton(selected = testType == 0, onClick = { testType = 0 }, shape = SegmentedButtonDefaults.itemShape(0, 3)) { Text("عادي") }
+                        SegmentedButton(selected = testType == 1, onClick = { testType = 1 }, shape = SegmentedButtonDefaults.itemShape(1, 3)) { Text("منبّه") }
+                        SegmentedButton(selected = testType == 2, onClick = { testType = 2 }, shape = SegmentedButtonDefaults.itemShape(2, 3)) { Text("الاثنان معًا") }
+                    }
+                    Text(
+                        "«عادي» هو النوع المستخدم الآن. «منبّه» هو وضع الموثوقية العالية (يظهر رمز منبّه بشريط الحالة). «الاثنان معًا» يجدول اختبارين بنفس الدقيقة لمقارنة وقت وصولهما.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(listOf(1 to "دقيقة", 3 to "3 دقائق", 5 to "5 دقائق", 10 to "10 دقائق")) { (minutes, label) ->
@@ -132,7 +155,7 @@ fun NotificationLabScreen(controller: AppController, onBack: () -> Unit) {
                             Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(test.label, fontWeight = FontWeight.Bold)
+                                Text("${test.label} • ${alarmTypeLabel(test.alarmType)}", fontWeight = FontWeight.Bold)
                                 val remaining = ((test.scheduledAtMillis - now) / 1000).coerceAtLeast(0)
                                 Text(
                                     "الموعد: ${timeFmt.format(epochToLocal(test.scheduledAtMillis))} — متبقٍ ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}",
@@ -167,7 +190,7 @@ fun NotificationLabScreen(controller: AppController, onBack: () -> Unit) {
             if (log.isEmpty()) {
                 item { Text("لا توجد نتائج بعد.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             } else {
-                items(log, key = { it.id }) { entry -> LogRow(entry) }
+                items(log, key = { "${it.id}-${it.deliveredAtMillis}" }) { entry -> LogRow(entry) }
             }
         }
     }
@@ -225,6 +248,15 @@ private fun LogRow(entry: NotificationTestLogEntry) {
                 "${entry.deviceManufacturer} ${entry.deviceModel} • أندرويد ${entry.androidRelease} • استثناء توفير البطارية: ${if (entry.batteryOptimizationIgnored) "نعم" else "لا"} • تنبيهات دقيقة: ${if (entry.canScheduleExactAlarms) "مفعّلة" else "غير مفعّلة"}",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(4.dp))
+            // State of the phone/app at the moment the alarm was actually delivered — this is what tells a
+            // "held by the system until the phone woke up" delay apart from a plain scheduling problem.
+            Text(
+                "نوع التنبيه: ${alarmTypeLabel(entry.alarmType)} • الشاشة: ${if (entry.screenOn) "شغّالة" else "مطفية"} • وضع الخمول: ${if (entry.deviceIdle) "نعم" else "لا"} • " +
+                    "فئة التطبيق: ${bucketLabel(entry.standbyBucket)} • عمر العملية: ${processAgeLabel(entry.processAgeSeconds)} • منذ آخر فتح للتطبيق: ${sinceOpenLabel(entry.minutesSinceAppOpened)} • " +
+                    "شحن: ${if (entry.charging) "نعم" else "لا"} • توفير الطاقة: ${if (entry.powerSave) "نعم" else "لا"} • مقيّد بالخلفية: ${if (entry.backgroundRestricted) "نعم" else "لا"}",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -234,3 +266,33 @@ private fun LabSectionHeader(title: String) = Text(
     title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
     color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
 )
+
+private fun alarmTypeLabel(type: String) = when (type) {
+    "exact" -> "دقيق"
+    "clock" -> "منبّه"
+    "inexact" -> "غير دقيق"
+    else -> "—"
+}
+
+private fun bucketLabel(bucket: Int) = when {
+    bucket < 0 -> "—"
+    bucket <= 10 -> "نشط"
+    bucket <= 20 -> "مجموعة العمل"
+    bucket <= 30 -> "متكرر"
+    bucket <= 40 -> "نادر"
+    else -> "مقيّد"
+}
+
+// A process only a few seconds old means the system had to start the app just to deliver this alarm.
+private fun processAgeLabel(seconds: Long) = when {
+    seconds < 0 -> "—"
+    seconds < 10 -> "بدأت للتو (${seconds}ث)"
+    seconds < 120 -> "${seconds}ث"
+    else -> "${seconds / 60}د"
+}
+
+private fun sinceOpenLabel(minutes: Long) = when {
+    minutes < 0 -> "—"
+    minutes < 60 -> "${minutes}د"
+    else -> "${minutes / 60}س ${minutes % 60}د"
+}

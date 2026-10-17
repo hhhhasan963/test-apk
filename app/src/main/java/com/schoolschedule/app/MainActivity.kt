@@ -2,6 +2,7 @@ package com.schoolschedule.app
 
 import android.Manifest
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -17,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
+import com.schoolschedule.app.data.AppPreferences
 import com.schoolschedule.app.notifications.AlarmReceiver
 import com.schoolschedule.app.ui.AppController
 import com.schoolschedule.app.ui.SchoolScheduleApp
@@ -45,10 +47,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Remember when the app was last opened: it's logged next to every
+        // notification so late deliveries can be matched against app usage.
+        runCatching { AppPreferences(applicationContext).lastOpenedAtMillis = System.currentTimeMillis() }
+        // Opening the app clears whatever class notifications are still sitting
+        // in the shade (already-delivered ones only; scheduled alarms are untouched).
+        runCatching { getSystemService(NotificationManager::class.java).cancelAll() }
         // Coming back from the "Alarms & reminders" settings screen (or any
         // other trip outside the app) is the right time to re-schedule with
         // exact alarms if the permission was just granted.
         controller?.reload()
+        // Lets the readiness checks / battery banner re-read the system state.
+        controller?.onAppResumed()
     }
 
     private fun requestDataAccessIfNeeded() {

@@ -13,7 +13,7 @@ import com.schoolschedule.app.data.NotificationTestStore
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == NotificationScheduler.ACTION_REFRESH) {
-            NotificationScheduler.reschedule(context)
+            runCatching { NotificationScheduler.reschedule(context) }
             return
         }
         if (intent.action == NotificationScheduler.ACTION_TEST) {
@@ -29,6 +29,9 @@ class AlarmReceiver : BroadcastReceiver() {
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            // Tapping the notification opens the app.
+            .setContentIntent(NotificationScheduler.openAppPendingIntent(context))
             .setAutoCancel(true)
             .build()
         val id = intent.getIntExtra("id", 1)
@@ -37,7 +40,10 @@ class AlarmReceiver : BroadcastReceiver() {
         // delay can be checked against actual daily usage, not just manual tests.
         val scheduledAtMillis = intent.getLongExtra("scheduledAtMillis", -1L)
         if (scheduledAtMillis > 0) {
-            NotificationTestStore.recordDelivery(context, id.toString(), "$title — $message", scheduledAtMillis, isTest = false)
+            NotificationTestStore.recordDelivery(
+                context, id.toString(), "$title — $message", scheduledAtMillis,
+                isTest = false, alarmType = intent.getStringExtra("alarmType") ?: "",
+            )
         }
     }
 
@@ -48,8 +54,9 @@ class AlarmReceiver : BroadcastReceiver() {
         val testId = intent.getStringExtra("testId") ?: return
         val label = intent.getStringExtra("label") ?: "اختبار"
         val scheduledAtMillis = intent.getLongExtra("scheduledAtMillis", System.currentTimeMillis())
+        val alarmType = intent.getStringExtra("alarmType") ?: ""
         val deliveredAtMillis = System.currentTimeMillis()
-        NotificationTestStore.recordDelivery(context, testId, label, scheduledAtMillis, isTest = true)
+        NotificationTestStore.recordDelivery(context, testId, label, scheduledAtMillis, isTest = true, alarmType = alarmType)
         ensureChannel(context)
         val deltaSeconds = (deliveredAtMillis - scheduledAtMillis) / 1000
         val body = if (deltaSeconds <= 2) "وصل بالوقت تمامًا ✅" else "تأخر عن الموعد بـ $deltaSeconds ثانية"
@@ -58,6 +65,7 @@ class AlarmReceiver : BroadcastReceiver() {
             .setContentTitle("🧪 نتيجة اختبار: $label")
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(NotificationScheduler.openAppPendingIntent(context))
             .setAutoCancel(true)
             .build()
         context.getSystemService(NotificationManager::class.java).notify(testId.hashCode(), notification)

@@ -23,7 +23,7 @@ data class Lesson(
 )
 
 sealed interface DayStatus {
-    data class Holiday(val note: String?) : DayStatus
+    data class Holiday(val note: String?, val date: LocalDate) : DayStatus
     /** Not a calendar holiday, but this person has zero periods today (e.g. a teacher whose subject isn't taught that day). */
     data object NoLessonsToday : DayStatus
     data object Finished : DayStatus

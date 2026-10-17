@@ -2,7 +2,12 @@
 
 package com.schoolschedule.app.ui
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.os.SystemClock
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -46,6 +51,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
@@ -96,8 +105,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -110,12 +121,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.schoolschedule.app.R
 import com.schoolschedule.app.data.AppPreferences
+import com.schoolschedule.app.data.NotificationTestLogEntry
+import com.schoolschedule.app.data.NotificationTestStore
 import com.schoolschedule.app.data.StorageRepository
 import com.schoolschedule.app.domain.DataLoadResult
 import com.schoolschedule.app.domain.DayStatus
@@ -125,6 +142,7 @@ import com.schoolschedule.app.domain.ScheduleEngine
 import com.schoolschedule.app.domain.UserRole
 import com.schoolschedule.app.domain.UserSelection
 import com.schoolschedule.app.notifications.NotificationScheduler
+import com.schoolschedule.app.notifications.Reliability
 import com.schoolschedule.app.ui.theme.LogoDeepBlue
 import com.schoolschedule.app.ui.theme.LogoGold
 import com.schoolschedule.app.ui.theme.LogoOrange
@@ -134,6 +152,7 @@ import com.schoolschedule.app.ui.theme.ThemeMode
 import com.schoolschedule.app.ui.theme.subjectColor
 import com.schoolschedule.app.ui.theme.subjectIconRes
 import kotlinx.coroutines.delay
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -152,9 +171,41 @@ class AppController(private val context: Context) {
     var selection by mutableStateOf(preferences.selection)
         private set
     var screen by mutableStateOf(Screen.HOME)
+        private set
+    // Screens the user came from, so the system Back button steps backwards instead of leaving the app.
+    private val backStack = mutableStateListOf<Screen>()
+    val canGoBack: Boolean get() = backStack.isNotEmpty()
+    fun navigate(target: Screen) {
+        if (target == screen) return
+        val existing = backStack.lastIndexOf(target)
+        if (existing >= 0) {
+            // Returning to a screen already in the history: drop everything above it instead of stacking duplicates.
+            while (backStack.size > existing) backStack.removeAt(backStack.lastIndex)
+        } else {
+            backStack.add(screen)
+        }
+        screen = target
+    }
+    fun goBack(): Boolean {
+        if (backStack.isEmpty()) return false
+        screen = backStack.removeAt(backStack.lastIndex)
+        return true
+    }
     var notifyStart by mutableStateOf(preferences.notifyStart)
     var notifyEnd by mutableStateOf(preferences.notifyEnd)
     var notifyBefore by mutableStateOf(preferences.notifyBefore)
+    var notifyEndOfDay by mutableStateOf(preferences.notifyEndOfDay)
+    var highReliability by mutableStateOf(preferences.highReliability)
+    // Bumped every time the app returns to the foreground, so readiness checks re-read the system state
+    // (e.g. after the user comes back from a settings page).
+    var resumeTick by mutableStateOf(0)
+        private set
+    var batteryBannerDismissed by mutableStateOf(preferences.batteryBannerDismissed)
+        private set
+    var batteryBannerRemindAfter by mutableStateOf(preferences.batteryBannerRemindAfter)
+        private set
+    var delayAlertDismissedAt by mutableStateOf(preferences.delayAlertDismissedAt)
+        private set
     var themeMode by mutableStateOf(runCatching { ThemeMode.valueOf(preferences.themeMode) }.getOrDefault(ThemeMode.SYSTEM))
 
     init { reload() }
@@ -166,11 +217,16 @@ class AppController(private val context: Context) {
         if (data != null && selection != null) safeReschedule()
     }
     fun restore() { errors = repository.restoreDefaults(); reload() }
-    fun saveSelection(value: UserSelection) { preferences.selection = value; selection = value; screen = Screen.HOME; safeReschedule() }
-    fun clearSelection() { preferences.selection = null; selection = null; safeCancelAll() }
-    fun updateNotifications(start: Boolean = notifyStart, end: Boolean = notifyEnd, before: Boolean = notifyBefore) {
-        notifyStart = start; notifyEnd = end; notifyBefore = before
-        preferences.notifyStart = start; preferences.notifyEnd = end; preferences.notifyBefore = before
+    fun saveSelection(value: UserSelection) { preferences.selection = value; selection = value; backStack.clear(); screen = Screen.HOME; safeReschedule() }
+    fun clearSelection() { preferences.selection = null; selection = null; backStack.clear(); screen = Screen.HOME; safeCancelAll() }
+    fun onAppResumed() { resumeTick++ }
+    fun snoozeBatteryBanner() { val until = System.currentTimeMillis() + 24L * 60 * 60 * 1000; preferences.batteryBannerRemindAfter = until; batteryBannerRemindAfter = until }
+    fun dismissBatteryBannerForever() { preferences.batteryBannerDismissed = true; batteryBannerDismissed = true }
+    fun dismissDelayAlert() { val now = System.currentTimeMillis(); preferences.delayAlertDismissedAt = now; delayAlertDismissedAt = now }
+    fun setHighReliability(enabled: Boolean) { highReliability = enabled; preferences.highReliability = enabled; safeReschedule() }
+    fun updateNotifications(start: Boolean = notifyStart, end: Boolean = notifyEnd, before: Boolean = notifyBefore, endOfDay: Boolean = notifyEndOfDay) {
+        notifyStart = start; notifyEnd = end; notifyBefore = before; notifyEndOfDay = endOfDay
+        preferences.notifyStart = start; preferences.notifyEnd = end; preferences.notifyBefore = before; preferences.notifyEndOfDay = endOfDay
         safeReschedule()
     }
     // Scheduling notifications is a nice-to-have: a failure here (stale alarm
@@ -200,12 +256,39 @@ fun SchoolScheduleApp(controller: AppController) {
         ThemeMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
     }
     SchoolScheduleTheme(darkTheme = darkTheme, dynamicColor = false) {
+        // Registered first = lowest priority: only fires when no inner screen wants to handle Back.
+        DoubleBackToExit()
         Crossfade(targetState = whichRoot(controller), label = "root") { root ->
             when (root) {
                 Root.PROBLEM -> DataProblemScreen(controller)
                 Root.SETUP -> SetupScreen(controller)
                 Root.MAIN -> MainScaffold(controller)
             }
+        }
+    }
+}
+
+private fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
+}
+
+// Standard "press back again to exit" behaviour: first press shows a hint, a second one within 2 seconds closes the app.
+@Composable
+private fun DoubleBackToExit() {
+    val context = LocalContext.current
+    var lastBackAt by remember { mutableStateOf(0L) }
+    BackHandler {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBackAt < 2000) {
+            context.findActivity()?.finish()
+        } else {
+            lastBackAt = now
+            Toast.makeText(context, "اضغط رجوع مرة أخرى للإغلاق", Toast.LENGTH_SHORT).show()
         }
     }
 }
@@ -236,6 +319,7 @@ private fun SetupScreen(controller: AppController) {
     val engine = remember(controller.data) { ScheduleEngine(requireNotNull(controller.data)) }
     var role by rememberSaveable { mutableStateOf<UserRole?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
+    BackHandler(enabled = role != null) { role = null; query = "" }
     Scaffold(topBar = { TitleBar("إعداد الدوام") }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
@@ -288,13 +372,14 @@ private fun MainScaffold(controller: AppController) {
     // Settings, not a primary destination — it hides the bottom bar and gets
     // its own back arrow instead, like a normal "sub-page".
     val isSubScreen = controller.screen == Screen.NOTIFICATION_LAB
+    BackHandler(enabled = controller.canGoBack) { controller.goBack() }
     Scaffold(
         bottomBar = {
             if (!isSubScreen) NavigationBar {
                 bottomDestinations.forEach { (screen, label, icon) ->
                     NavigationBarItem(
                         selected = controller.screen == screen,
-                        onClick = { controller.screen = screen },
+                        onClick = { controller.navigate(screen) },
                         icon = { Icon(icon, label) },
                         label = { Text(label) },
                         colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer),
@@ -324,7 +409,7 @@ private fun MainScaffold(controller: AppController) {
                     Screen.TOMORROW -> DayAheadScreen(controller)
                     Screen.FULL -> TableScreen(controller, todayOnly = false)
                     Screen.SETTINGS -> SettingsScreen(controller)
-                    Screen.NOTIFICATION_LAB -> NotificationLabScreen(controller) { controller.screen = Screen.SETTINGS }
+                    Screen.NOTIFICATION_LAB -> NotificationLabScreen(controller) { controller.goBack() }
                 }
             }
         }
@@ -338,13 +423,16 @@ private fun HomeScreen(controller: AppController) {
     LaunchedEffect(Unit) { while (true) { now = LocalDateTime.now(); delay(1000) } }
     val status = engine.status(now, selection)
     val todayLessons = remember(now.toLocalDate(), data) { engine.lessonsFor(now.toLocalDate(), selection) }
+    val holidayText = (status as? DayStatus.Holiday)?.let { holidayMessage(engine, it.date, tomorrow = false) }
+    val bannerStatus = batteryBannerStatus(controller)
     Scaffold(topBar = { TitleBar("دوامي المدرسي") }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (bannerStatus != null) item { StaggeredEntrance(0) { BatteryRestrictionBanner(controller, bannerStatus) } }
             item { StaggeredEntrance(0) { HeaderDate(engine, now.toLocalDate(), selection) } }
             item {
                 StaggeredEntrance(1) {
                     AnimatedContent(targetState = status::class, label = "status") { _ ->
-                        CurrentStatusCard(status, selection.role == UserRole.TEACHER)
+                        CurrentStatusCard(status, selection.role == UserRole.TEACHER, holidayText)
                     }
                 }
             }
@@ -413,7 +501,8 @@ private fun DayAheadScreen(controller: AppController) {
             item { HeaderDate(engine, date, selection) }
             when {
                 engine.isHoliday(date) -> item {
-                    StatusMessageCard("غدًا عطلة 🌤️", engine.holidayNote(date) ?: "الجمعة والسبت والعطل الاستثنائية لا تحتوي على حصص.", offDay = true)
+                    val (holidayTitle, holidaySubtitle) = holidayMessage(engine, date, tomorrow = true)
+                    StatusMessageCard(holidayTitle, holidaySubtitle, offDay = true)
                 }
                 lessons.isEmpty() && selection.role == UserRole.TEACHER -> item {
                     StatusMessageCard("غدًا عطلتك المميزة 🎉", "استمتع بوقت فراغك", offDay = true)
@@ -454,7 +543,7 @@ private fun HeaderDate(engine: ScheduleEngine, date: LocalDate, selection: UserS
 }
 
 @Composable
-private fun CurrentStatusCard(status: DayStatus, teacher: Boolean) {
+private fun CurrentStatusCard(status: DayStatus, teacher: Boolean, holidayText: Pair<String, String>? = null) {
     val isOffDay = status is DayStatus.Holiday || status is DayStatus.NoLessonsToday
     val brush = if (isOffDay) Brush.linearGradient(listOf(LogoGold, LogoOrange)) else Brush.linearGradient(listOf(LogoSkyBlue, LogoDeepBlue))
     val onColor = Color.White
@@ -466,8 +555,10 @@ private fun CurrentStatusCard(status: DayStatus, teacher: Boolean) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (status) {
                 is DayStatus.Holiday -> {
-                    Text("اليوم عطلة 🌤️", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = onColor)
-                    Text(status.note ?: "الجمعة والسبت والعطل الاستثنائية لا تحتوي على حصص.", color = onColor.copy(alpha = 0.92f))
+                    val (holidayTitle, holidaySubtitle) = holidayText ?: ("اليوم عطلة 🌤️" to (status.note ?: "لا توجد حصص اليوم"))
+                    DayOffIllustration(modifier = Modifier.size(120.dp).align(Alignment.CenterHorizontally))
+                    Text(holidayTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = onColor, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                    Text(holidaySubtitle, color = onColor.copy(alpha = 0.92f), modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                 }
                 DayStatus.NoLessonsToday -> if (teacher) {
                     DayOffIllustration(modifier = Modifier.size(120.dp).align(Alignment.CenterHorizontally))
@@ -503,17 +594,11 @@ private fun CurrentStatusCard(status: DayStatus, teacher: Boolean) {
                                 progress = { animatedProgress }, modifier = Modifier.fillMaxSize(), strokeWidth = 7.dp,
                                 color = onColor, trackColor = onColor.copy(alpha = 0.25f),
                             )
-                            AnimatedContent(
-                                targetState = formatDurationCompact(status.remainingSeconds), label = "ringTime",
-                                transitionSpec = { (slideInVertically(tween(220)) { it / 2 } + fadeIn(tween(220))) togetherWith (slideOutVertically(tween(220)) { -it / 2 } + fadeOut(tween(220))) },
-                            ) { text -> Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = onColor) }
+                            CompactClock(status.remainingSeconds, MaterialTheme.typography.labelLarge, onColor)
                         }
                         Column {
                             Text("باقٍ على نهاية الحصة", color = onColor.copy(alpha = 0.85f), style = MaterialTheme.typography.bodySmall)
-                            AnimatedContent(
-                                targetState = formatDuration(status.remainingSeconds), label = "remainingText",
-                                transitionSpec = { (slideInVertically(tween(220)) { it / 2 } + fadeIn(tween(220))) togetherWith (slideOutVertically(tween(220)) { -it / 2 } + fadeOut(tween(220))) },
-                            ) { text -> Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = onColor) }
+                            RemainingTimeText(status.remainingSeconds, MaterialTheme.typography.titleMedium, onColor)
                         }
                     }
                     Divider(Modifier.padding(vertical = 4.dp), color = onColor.copy(alpha = 0.3f))
@@ -529,7 +614,61 @@ private fun CurrentStatusCard(status: DayStatus, teacher: Boolean) {
 private fun NextLesson(lesson: Lesson, starts: LocalTime, remaining: Long?, teacher: Boolean, contentColor: Color) {
     LessonDetails(lesson, teacher, contentColor)
     Text("تبدأ $starts", fontWeight = FontWeight.Medium, color = contentColor)
-    if (remaining != null) Text("بعد ${formatDuration(remaining)}", color = contentColor.copy(alpha = 0.92f))
+    if (remaining != null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("بعد ", color = contentColor.copy(alpha = 0.92f))
+            RemainingTimeText(remaining, MaterialTheme.typography.bodyLarge, contentColor.copy(alpha = 0.92f), FontWeight.Normal)
+        }
+    }
+}
+
+// One number that slides when (and only when) its own value changes — so in a countdown the
+// seconds animate every tick, while minutes/hours animate only on the tick they actually change.
+@Composable
+private fun AnimatedNumber(value: Int, minDigits: Int, style: TextStyle, color: Color, fontWeight: FontWeight) {
+    AnimatedContent(
+        targetState = value, label = "number",
+        transitionSpec = { (slideInVertically(tween(220)) { it / 2 } + fadeIn(tween(220))) togetherWith (slideOutVertically(tween(220)) { -it / 2 } + fadeOut(tween(220))) },
+    ) { v -> Text(v.toString().padStart(minDigits, '0'), style = style, fontWeight = fontWeight, color = color) }
+}
+
+// "12 دقيقة و30 ثانية" with each number animated independently (hours/minutes are omitted while zero).
+@Composable
+private fun RemainingTimeText(totalSeconds: Long, style: TextStyle, color: Color, fontWeight: FontWeight = FontWeight.Bold) {
+    val t = totalSeconds.coerceAtLeast(0)
+    val hours = (t / 3600).toInt(); val minutes = ((t % 3600) / 60).toInt(); val seconds = (t % 60).toInt()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (hours > 0) {
+            AnimatedNumber(hours, 1, style, color, fontWeight)
+            Text(" ساعة و", style = style, color = color, fontWeight = fontWeight)
+        }
+        if (hours > 0 || minutes > 0) {
+            AnimatedNumber(minutes, 1, style, color, fontWeight)
+            Text(" دقيقة و", style = style, color = color, fontWeight = fontWeight)
+        }
+        AnimatedNumber(seconds, 1, style, color, fontWeight)
+        Text(" ثانية", style = style, color = color, fontWeight = fontWeight)
+    }
+}
+
+// "mm:ss" inside the progress ring. Forced left-to-right so the digits read 12:30, not 30:12, in an RTL layout.
+@Composable
+private fun CompactClock(totalSeconds: Long, style: TextStyle, color: Color) {
+    val t = totalSeconds.coerceAtLeast(0)
+    val hours = (t / 3600).toInt(); val minutes = ((t % 3600) / 60).toInt(); val seconds = (t % 60).toInt()
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (hours > 0) {
+                AnimatedNumber(hours, 1, style, color, FontWeight.Bold)
+                Text(":", style = style, color = color, fontWeight = FontWeight.Bold)
+                AnimatedNumber(minutes, 2, style, color, FontWeight.Bold)
+            } else {
+                AnimatedNumber(minutes, 1, style, color, FontWeight.Bold)
+            }
+            Text(":", style = style, color = color, fontWeight = FontWeight.Bold)
+            AnimatedNumber(seconds, 2, style, color, FontWeight.Bold)
+        }
+    }
 }
 
 // For a teacher, the class/grade matters more in the moment than the subject
@@ -558,17 +697,20 @@ private fun TableScreen(controller: AppController, todayOnly: Boolean) {
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (!todayOnly && selection.role == UserRole.TEACHER) {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    SegmentedButton(selected = teacherTab == 0, onClick = { teacherTab = 0 }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("كل الصفوف") }
-                    SegmentedButton(selected = teacherTab == 1, onClick = { teacherTab = 1 }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("برنامجي الأسبوعي") }
+                    SegmentedButton(selected = teacherTab == 0, onClick = { teacherTab = 0 }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("برنامجي الأسبوعي") }
+                    SegmentedButton(selected = teacherTab == 1, onClick = { teacherTab = 1 }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("كل الصفوف") }
                 }
             }
             val today = LocalDate.now()
             LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (todayOnly && engine.isHoliday(today)) {
-                    item { StatusMessageCard("اليوم عطلة 🌤️", engine.holidayNote(today) ?: "الجمعة والسبت والعطل الاستثنائية لا تحتوي على حصص.", offDay = true) }
+                    item {
+                        val (holidayTitle, holidaySubtitle) = holidayMessage(engine, today, tomorrow = false)
+                        StatusMessageCard(holidayTitle, holidaySubtitle, offDay = true)
+                    }
                 } else if (todayOnly && selection.role == UserRole.TEACHER && engine.lessonsForDay(days.first(), selection).isEmpty()) {
                     item { StatusMessageCard("اليوم عطلتك المميزة 🎉", "استمتع بوقت فراغك", offDay = true) }
-                } else if (!todayOnly && selection.role == UserRole.TEACHER && teacherTab == 1) {
+                } else if (!todayOnly && selection.role == UserRole.TEACHER && teacherTab == 0) {
                     items(days) { day -> TeacherDayCard(day, engine.lessonsForDay(day, selection)) }
                 } else items(days) { day ->
                     val now = if (todayOnly) LocalTime.now() else null
@@ -723,8 +865,10 @@ private fun SettingsScreen(controller: AppController) {
     var editingDate by remember { mutableStateOf<LocalDate?>(null) }
     var noteDraft by remember { mutableStateOf("") }
 
+    val lateNotification = lastLateNotification(controller)
     Scaffold(topBar = { TitleBar("الإعدادات") }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (lateNotification != null) item { DelayAlertCard(controller, lateNotification) }
             item { SectionHeader("المظهر") }
             item {
                 Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium) {
@@ -745,7 +889,12 @@ private fun SettingsScreen(controller: AppController) {
             item { ToggleItem(Icons.Default.NotificationsActive, "إشعار عند بداية الحصة", controller.notifyStart) { controller.updateNotifications(start = it) } }
             item { ToggleItem(Icons.Default.NotificationsActive, "إشعار عند نهاية الحصة", controller.notifyEnd) { controller.updateNotifications(end = it) } }
             item { ToggleItem(Icons.Default.NotificationsActive, "إشعار قبل الحصة بـ5 دقائق", controller.notifyBefore) { controller.updateNotifications(before = it) } }
-            item { SettingItem(Icons.Default.Science, "اختبار الإشعارات", "جدول تنبيهات تجريبية وسجّل الفرق الزمني بدقة") { controller.screen = Screen.NOTIFICATION_LAB } }
+            item { ToggleItem(Icons.Default.NotificationsActive, "إشعار عند نهاية الدوام", controller.notifyEndOfDay) { controller.updateNotifications(endOfDay = it) } }
+            item { ToggleItem(Icons.Default.Alarm, "وضع الموثوقية العالية (يظهر رمز منبّه بشريط الحالة)", controller.highReliability) { controller.setHighReliability(it) } }
+            item { SettingItem(Icons.Default.Science, "اختبار الإشعارات", "جدول تنبيهات تجريبية وسجّل الفرق الزمني بدقة") { controller.navigate(Screen.NOTIFICATION_LAB) } }
+
+            item { SectionHeader("جاهزية التنبيهات") }
+            item { ReadinessCard(controller) }
 
             item { SectionHeader("العطل") }
             item {
@@ -902,9 +1051,150 @@ internal fun TitleBar(title: String, action: @Composable (() -> Unit)? = null, o
     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
 )
 
-private fun formatDuration(seconds: Long): String { val m = seconds / 60; val s = seconds % 60; return if (m > 0) "$m دقيقة${if (s > 0) " و$s ثانية" else ""}" else "$s ثانية" }
-// Compact "MM:SS" for inside the small progress ring, where a full sentence won't fit.
-private fun formatDurationCompact(seconds: Long): String { val m = seconds / 60; val s = seconds % 60; return "%d:%02d".format(m, s) }
 private val arabicMonths = listOf("", "كانون الثاني", "شباط", "آذار", "نيسان", "أيار", "حزيران", "تموز", "آب", "أيلول", "تشرين الأول", "تشرين الثاني", "كانون الأول")
 private fun arabicDate(date: LocalDate): String = "${date.dayOfMonth} ${arabicMonths[date.monthValue]}"
 private fun arabicDateWithYear(date: LocalDate): String = "${date.dayOfMonth} ${arabicMonths[date.monthValue]} ${date.year}"
+
+// ---------------------------------------------------------------------------------------------
+// Holiday wording
+// ---------------------------------------------------------------------------------------------
+
+// Title + subtitle for an off day. A reason the user added in Settings → العطل always wins;
+// otherwise Friday/Saturday get their own friendly wording.
+private fun holidayMessage(engine: ScheduleEngine, date: LocalDate, tomorrow: Boolean): Pair<String, String> {
+    val whenWord = if (tomorrow) "غدًا" else "اليوم"
+    engine.holidayNote(date)?.let { return "$whenWord عطلة 🌤️" to it }
+    return when (date.dayOfWeek) {
+        DayOfWeek.FRIDAY -> "$whenWord هو يوم الجمعة 🕌" to "استمتع بعطلتك 🌴"
+        DayOfWeek.SATURDAY -> {
+            // Only remind about Sunday if it's actually a school day.
+            val sundayIsSchoolDay = !engine.isHoliday(date.plusDays(1))
+            val extra = when {
+                !sundayIsSchoolDay -> ""
+                tomorrow -> "\nوبعده الأحد 😉"
+                else -> "\nوتذكّر غدًا الأحد 😉"
+            }
+            "$whenWord هو يوم السبت 😎" to "استمتع بعطلتك 🌴$extra"
+        }
+        else -> "$whenWord عطلة 🌤️" to "لا توجد حصص، استمتع بوقتك 🌴"
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Battery restrictions: home banner, settings alert, readiness checklist
+// ---------------------------------------------------------------------------------------------
+
+// Returns the current system status only when the home banner should be shown (null = hide it).
+@Composable
+private fun batteryBannerStatus(controller: AppController): Reliability.Status? {
+    val context = LocalContext.current
+    val status = remember(controller.resumeTick) { Reliability.status(context) }
+    val snoozed = System.currentTimeMillis() < controller.batteryBannerRemindAfter
+    return if (status.hasBatteryIssue && !controller.batteryBannerDismissed && !snoozed) status else null
+}
+
+@Composable
+private fun BatteryRestrictionBanner(controller: AppController, status: Reliability.Status) {
+    val context = LocalContext.current
+    Card(shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.BatteryAlert, null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                Spacer(Modifier.width(10.dp))
+                Text("قيود البطارية قد تؤخر الإشعارات", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+            }
+            Text(
+                if (Reliability.isXiaomiFamily) "عند تقييد التطبيق بالخلفية قد يصل التنبيه متأخرًا عدة دقائق. اسمح له بالعمل بدون قيود، وعلى أجهزة شاومي فعّل كمان «التشغيل التلقائي» من الإعدادات."
+                else "عند تقييد التطبيق بالخلفية قد يصل التنبيه متأخرًا عدة دقائق. اسمح له بالعمل بدون قيود.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Button(
+                onClick = { if (status.backgroundRestricted) Reliability.openAppDetails(context) else Reliability.requestIgnoreBatteryOptimizations(context) },
+                modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
+            ) { Icon(Icons.Default.Settings, null); Spacer(Modifier.width(8.dp)); Text("فتح الإعدادات") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { controller.snoozeBatteryBanner() }) { Text("ذكّرني لاحقًا") }
+                TextButton(onClick = { controller.dismissBatteryBannerForever() }) { Text("لا تذكّرني") }
+            }
+        }
+    }
+}
+
+// The most recent real notification that arrived more than a minute late, unless the user already dismissed that alert.
+@Composable
+private fun lastLateNotification(controller: AppController): NotificationTestLogEntry? =
+    remember(controller.resumeTick, controller.delayAlertDismissedAt) {
+        NotificationTestStore.readLog()
+            .filter { !it.isTest && it.deltaSeconds > 60 }
+            .maxByOrNull { it.deliveredAtMillis }
+            ?.takeIf { it.deliveredAtMillis > controller.delayAlertDismissedAt }
+    }
+
+@Composable
+private fun DelayAlertCard(controller: AppController, entry: NotificationTestLogEntry) {
+    val context = LocalContext.current
+    val local = Instant.ofEpochMilli(entry.deliveredAtMillis).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+    val minutes = entry.deltaSeconds / 60
+    val seconds = entry.deltaSeconds % 60
+    Card(shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                Spacer(Modifier.width(10.dp))
+                Text("وصل إشعار متأخر", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+            Text(
+                "آخر مرة: ${arabicDate(local.toLocalDate())} الساعة ${"%02d:%02d".format(local.hour, local.minute)} — تأخر $minutes دقيقة و$seconds ثانية. " +
+                    "السبب غالبًا قيود البطارية على التطبيق، افتح إعداداتها واسمح له بالعمل بدون قيود.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { if (Reliability.isXiaomiFamily) Reliability.openXiaomiBatterySaver(context) else Reliability.requestIgnoreBatteryOptimizations(context) },
+                    shape = MaterialTheme.shapes.medium,
+                ) { Text("فتح إعدادات البطارية") }
+                TextButton(onClick = { controller.dismissDelayAlert() }) { Text("تجاهل") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadinessCard(controller: AppController) {
+    val context = LocalContext.current
+    val status = remember(controller.resumeTick) { Reliability.status(context) }
+    Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            ReadinessRow("الإشعارات مسموحة", status.notificationsAllowed) { Reliability.openNotificationSettings(context) }
+            Divider()
+            ReadinessRow("التنبيهات الدقيقة (المنبّهات والتذكيرات)", status.exactAlarmsAllowed) { Reliability.openExactAlarmSettings(context) }
+            Divider()
+            ReadinessRow("استثناء التطبيق من توفير البطارية", status.batteryOptimizationIgnored) { Reliability.requestIgnoreBatteryOptimizations(context) }
+            Divider()
+            ReadinessRow("بدون تقييد على الخلفية", !status.backgroundRestricted) { Reliability.openAppDetails(context) }
+            if (Reliability.isXiaomiFamily) {
+                Divider()
+                Column(Modifier.padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("جهاز شاومي: لهذه الأجهزة قيود إضافية لا يمكن للتطبيق قراءتها، فتأكد من الخيارين بنفسك:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { Reliability.openAutostart(context) }, shape = MaterialTheme.shapes.medium) { Text("التشغيل التلقائي") }
+                        OutlinedButton(onClick = { Reliability.openXiaomiBatterySaver(context) }, shape = MaterialTheme.shapes.medium) { Text("توفير البطارية: بدون قيود") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadinessRow(title: String, ok: Boolean, onFix: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            if (ok) Icons.Default.CheckCircle else Icons.Default.Warning, null,
+            tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        if (!ok) TextButton(onClick = onFix) { Text("إصلاح") }
+    }
+}
