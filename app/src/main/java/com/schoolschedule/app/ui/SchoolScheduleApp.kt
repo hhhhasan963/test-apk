@@ -223,7 +223,7 @@ class AppController(private val context: Context) {
     fun snoozeBatteryBanner() { val until = System.currentTimeMillis() + 24L * 60 * 60 * 1000; preferences.batteryBannerRemindAfter = until; batteryBannerRemindAfter = until }
     fun dismissBatteryBannerForever() { preferences.batteryBannerDismissed = true; batteryBannerDismissed = true }
     fun dismissDelayAlert() { val now = System.currentTimeMillis(); preferences.delayAlertDismissedAt = now; delayAlertDismissedAt = now }
-    fun setHighReliability(enabled: Boolean) { highReliability = enabled; preferences.highReliability = enabled; safeReschedule() }
+    fun updateHighReliability(enabled: Boolean) { highReliability = enabled; preferences.highReliability = enabled; safeReschedule() }
     fun updateNotifications(start: Boolean = notifyStart, end: Boolean = notifyEnd, before: Boolean = notifyBefore, endOfDay: Boolean = notifyEndOfDay) {
         notifyStart = start; notifyEnd = end; notifyBefore = before; notifyEndOfDay = endOfDay
         preferences.notifyStart = start; preferences.notifyEnd = end; preferences.notifyBefore = before; preferences.notifyEndOfDay = endOfDay
@@ -890,7 +890,7 @@ private fun SettingsScreen(controller: AppController) {
             item { ToggleItem(Icons.Default.NotificationsActive, "إشعار عند نهاية الحصة", controller.notifyEnd) { controller.updateNotifications(end = it) } }
             item { ToggleItem(Icons.Default.NotificationsActive, "إشعار قبل الحصة بـ5 دقائق", controller.notifyBefore) { controller.updateNotifications(before = it) } }
             item { ToggleItem(Icons.Default.NotificationsActive, "إشعار عند نهاية الدوام", controller.notifyEndOfDay) { controller.updateNotifications(endOfDay = it) } }
-            item { ToggleItem(Icons.Default.Alarm, "وضع الموثوقية العالية (يظهر رمز منبّه بشريط الحالة)", controller.highReliability) { controller.setHighReliability(it) } }
+            item { ToggleItem(Icons.Default.Alarm, "وضع الموثوقية العالية (يظهر رمز منبّه بشريط الحالة)", controller.highReliability) { controller.updateHighReliability(it) } }
             item { SettingItem(Icons.Default.Science, "اختبار الإشعارات", "جدول تنبيهات تجريبية وسجّل الفرق الزمني بدقة") { controller.navigate(Screen.NOTIFICATION_LAB) } }
 
             item { SectionHeader("جاهزية التنبيهات") }
